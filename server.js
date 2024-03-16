@@ -22,8 +22,8 @@ const taskSchema = z.object({
 });
 
 const userSchemaMongoose = new mongoose.Schema({
-  username: { type: string, required: true, unique: true },
-  password: { type: string, required: true, minlength: 6 },
+  username: { type: String, required: true, unique: true },
+  password: { type: String, required: true, minlength: 6 },
 });
 
 const taskSchemaMongoose = new mongoose.Schema({
@@ -47,17 +47,19 @@ const connectDB = async () => {
 
 connectDB();
 
-const middlewares = async (req, res, next) => {
+const authMiddlewares = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return res.status(401).json({ error: "Unauthorized" });
     }
-    const token = authHeader.split("")[1];
+    console.log("crossed 1");
+    const token = authHeader.split(" ")[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.user = decoded;
     next();
   } catch (err) {
+    console.log(err);
     return res.status(403).json({ error: "Forbidden" });
   }
 };
@@ -84,7 +86,16 @@ app.post("/signup", async (req, res) => {
     const payload = { userId: newUser._id };
     const token = jwt.sign(payload, process.env.JWT_SECRET);
     res.json({ token });
-  } catch {}
+  } catch (err) {
+    if (err.code === 11000) {
+      return res.status(409).json({ error: "Username already exists" });
+    }
+
+    console.error(err.message);
+    res
+      .status(err.status || 500)
+      .json({ error: err.message || "Server Error" });
+  }
 });
 
 app.post("/signin", async (req, res) => {
@@ -99,7 +110,123 @@ app.post("/signin", async (req, res) => {
     if (!isMatch) {
       throw createError(401, "Invalid Credentials");
     }
-
+    console.log("Aaa");
     const payload = { userId: user._id };
-  } catch {}
+    const token = jwt.sign(payload, process.env.JWT_SECRET);
+    res.json({ token });
+  } catch (err) {
+    console.error(err.message);
+    res
+      .status(err.status || 500)
+      .json({ error: err.message || "Server Error" });
+  }
+});
+
+app.post("/tasks", authMiddlewares, async (req, res) => {
+  try {
+    const { title, description, completed } = req.body;
+    const validTask = taskSchema.safeParse(req.body);
+    if (!validTask.success) {
+      return res.status(400).json(validTask.error.issues);
+    }
+    const newTask = new Task({
+      title,
+      description,
+      completed,
+      user: req.user.userId,
+    });
+    await newTask.save();
+    res.status(201).json(newTask);
+  } catch (err) {
+    console.error(err.message);
+    res
+      .status(err.status || 500)
+      .json({ error: err.message || "Server Error" });
+  }
+});
+
+app.get("/tasks", authMiddlewares, async (req, res) => {
+  try {
+    const tasks = await Task.find({ user: req.user.userId });
+    res.json(tasks);
+  } catch (err) {
+    console.error(err.message);
+    res
+      .status(err.status || 500)
+      .json({ error: err.message || "Server Error" });
+  }
+});
+
+app.get("/tasks/:taskId", authMiddlewares, async (req, res) => {
+  try {
+    const task = await Task.findOne({
+      _id: req.params.taskId,
+      user: req.user.userId,
+    });
+
+    if (!task) {
+      throw createError(404, "Task not found");
+    }
+
+    res.json(task);
+  } catch (err) {
+    console.error(err.message);
+    res
+      .status(err.status || 500)
+      .json({ error: err.message || "Server Error" });
+  }
+});
+
+app.patch("/tasks/:taskId", authMiddlewares, async (req, res) => {
+  try {
+    const { title, description, completed } = req.body;
+    const validTaskUpdate = taskSchema.safeParse(req.body);
+    if (!validTaskUpdate.success) {
+      return res.status(400).json(validTaskUpdate.error.issues);
+    }
+    const task = await Task.findOne({
+      _id: req.params.taskId,
+      user: req.user.userId,
+    });
+    if (!task) {
+      throw createError(404, "Task not found");
+    }
+    task.set({ title, description, completed });
+    await task.save();
+
+    res.json(task);
+  } catch (err) {
+    console.error(err.message);
+    res
+      .status(err.status || 500)
+      .json({ error: err.message || "Server Error" });
+  }
+});
+
+app.delete("/tasks/:taskId", authMiddlewares, async (req, res) => {
+  try {
+    const task = await Task.findOneAndDelete({
+      _id: req.params.taskId,
+      user: req.user.userId,
+    });
+
+    if (!task) {
+      throw createError(404, "Task not found");
+    }
+
+    res.json({ message: "Task deleted successfully" });
+  } catch (err) {
+    console.error(err.message);
+    res
+      .status(err.status || 500)
+      .json({ error: err.message || "Server Error" });
+  }
+});
+
+app.use((err, req, res, next) => {
+  res.status(err.status || 500).json({ error: err.message || "Server Error" });
+});
+
+app.listen(port, () => {
+  console.log(`Server listening on port ${port}`);
 });
