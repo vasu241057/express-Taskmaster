@@ -103,7 +103,7 @@ app.post("/signin", async (req, res) => {
     const { username, password } = req.body;
     const user = await User.findOne({ username });
     if (!user) {
-      throw createError(401, "Invalid Credentials");
+      throw createError(401, "Invalid Credential");
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
